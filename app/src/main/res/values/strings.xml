@@ -1,0 +1,52 @@
+<resources>
+    <string name="app_name">GuardianX</string>
+    <string name="app_tagline">Cybersecurity &amp; Personal Safety Engine</string>
+    <string name="status_system_ready">GuardianX Core Initialized</string>
+    <string name="status_network_online">Network Online</string>
+    <string name="status_network_offline">Local Offline Safety Active</string>
+
+    <!-- Navigation Tab Labels -->
+    <string name="nav_emergency">Emergency</string>
+    <string name="nav_contacts">Contacts</string>
+    <string name="nav_devices">Hardware</string>
+    <string name="nav_phishing">Scanner</string>
+    <string name="nav_evidence">Vault</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Emergency Screen -->
+    <string name="emergency_header_title">DEFENSE SHIELD</string>
+    <string name="emergency_sos_tap">HOLD 2S FOR SOS</string>
+    <string name="emergency_sos_active">EMERGENCY ACTIVE</string>
+    <string name="emergency_sos_cancel">CANCEL SOS</string>
+    <string name="emergency_status_idle">SHIELD IDLE • STANDBY</string>
+    <string name="emergency_status_active">BROADCASTING EMERGENCY</string>
+    <string name="emergency_quick_alert">Send Discreet Alert</string>
+
+    <!-- Contacts Screen -->
+    <string name="contacts_title">Trusted Circle</string>
+    <string name="contacts_subtitle">Authorized emergency contacts for real-time dispatch</string>
+    <string name="contacts_add_new">Add Contact</string>
+    <string name="contacts_empty_notice">No trusted contacts enrolled. Add contacts to enable emergency dispatches.</string>
+
+    <!-- Devices Screen -->
+    <string name="devices_title">Hardware &amp; BLE</string>
+    <string name="devices_subtitle">Continuity heartbeats &amp; ESP32 wireless beacon</string>
+    <string name="devices_enroll_button">Enroll Device</string>
+    <string name="devices_empty_notice">No ESP32 or wearable hardware paired. Local sensors are active.</string>
+
+    <!-- Phishing Screen -->
+    <string name="phishing_title">Cyber Threat Scanner</string>
+    <string name="phishing_subtitle">Inspect links, SMS &amp; messages for social engineering</string>
+    <string name="phishing_analyze_button">Inspect Target</string>
+    <string name="phishing_input_placeholder">Paste URL or message text to analyze...</string>
+
+    <!-- Evidence Vault Screen -->
+    <string name="evidence_title">Evidence Vault</string>
+    <string name="evidence_subtitle">Tamper-evident forensic incident logs &amp; telemetry</string>
+    <string name="evidence_record_notes">Record Incident Notes</string>
+    <string name="evidence_empty_notice">No forensic evidence recorded. Active emergency sessions capture telemetry and incident notes automatically.</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Security &amp; Privacy</string>
+    <string name="settings_subtitle">Engine preferences, audit logs &amp; encryption</string>
+</resources>

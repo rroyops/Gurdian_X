@@ -1,0 +1,6 @@
+{
+  "name": "GuardianX",
+  "description": "Production-grade cybersecurity-focused personal safety platform with emergency engine, offline resilience, trusted contacts, and hardware continuity.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
