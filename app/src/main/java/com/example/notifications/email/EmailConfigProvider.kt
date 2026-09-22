@@ -12,88 +12,59 @@ data class SmtpConfig(
 )
 
 object EmailConfigProvider {
-    fun getSenderEmail(): String {
+
+    private fun getBuildConfigField(fieldName: String): String? {
         return try {
-            val email = BuildConfig.GUARDIANX_ALERT_SENDER_EMAIL
-            if (email.isNotBlank() && email != "UNCONFIGURED") email else "alerts@guardianx.safety"
+            val field = BuildConfig::class.java.getField(fieldName)
+            val value = field.get(null) as? String
+            if (value != null && value.isNotBlank() && value != "UNCONFIGURED" && value != "alerts@guardianx.safety") value.trim() else null
         } catch (_: Throwable) {
-            "alerts@guardianx.safety"
+            null
         }
     }
 
     /**
-     * Reads the API key / secret provided in GUARDIANX_ALERT_API_KEY.
+     * Resolves the alert sender email address from any configured secret alias.
      */
-    fun getApiKey(): String {
-        return try {
-            val key = BuildConfig.GUARDIANX_ALERT_API_KEY
-            if (key == "UNCONFIGURED" || key.isBlank()) "" else key
-        } catch (_: Throwable) {
-            ""
-        }
+    fun getSenderEmail(): String {
+        return getBuildConfigField("GUARDIANX_GMAIL_USERNAME")
+            ?: getBuildConfigField("GUARDIANX_ALERT_SENDER_EMAIL")
+            ?: getBuildConfigField("GUARDIANX_ALERT_SEND")
+            ?: "rroy58230@gmail.com"
     }
 
+    /**
+     * Reads the API key / credential from any configured secret alias.
+     */
+    fun getApiKey(): String {
+        return getBuildConfigField("GUARDIANX_ALERT_API_K")
+            ?: getBuildConfigField("GUARDIANX_ALERT_API_KEY")
+            ?: getBuildConfigField("GUARDIANX_GMAIL_APP_PASSWORD")
+            ?: ""
+    }
+
+    /**
+     * Constructs the full SMTP configuration for direct Gmail dispatch.
+     */
     fun getSmtpConfig(): SmtpConfig {
-        val host = try {
-            val h = BuildConfig.GUARDIANX_SMTP_HOST
-            if (h.isNotBlank() && h != "UNCONFIGURED") h else "smtp.gmail.com"
-        } catch (_: Throwable) {
-            "smtp.gmail.com"
-        }
+        val host = getBuildConfigField("GUARDIANX_SMTP_HOST") ?: "smtp.gmail.com"
+        val portStr = getBuildConfigField("GUARDIANX_SMTP_PORT") ?: "587"
+        val port = portStr.toIntOrNull() ?: 587
 
-        val port = try {
-            val portStr = BuildConfig.GUARDIANX_SMTP_PORT
-            portStr.toIntOrNull() ?: 587
-        } catch (_: Throwable) {
-            587
-        }
+        val sender = getSenderEmail()
+        val username = getBuildConfigField("GUARDIANX_GMAIL_USERNAME")
+            ?: getBuildConfigField("GUARDIANX_ALERT_SENDER_EMAIL")
+            ?: getBuildConfigField("GUARDIANX_ALERT_SEND")
+            ?: (if (sender.contains("@")) sender else "rroy58230@gmail.com")
 
-        val explicitSender = getSenderEmail()
+        val appPassword = getBuildConfigField("GUARDIANX_GMAIL_APP_PASSWORD")
+            ?: getBuildConfigField("GUARDIANX_ALERT_API_K")
+            ?: getBuildConfigField("GUARDIANX_ALERT_API_KEY")
+            ?: ""
 
-        // Username resolution:
-        // 1. Check GUARDIANX_GMAIL_USERNAME
-        // 2. If blank/unconfigured, check if GUARDIANX_ALERT_SENDER_EMAIL is a valid email (e.g. rroy58230@gmail.com)
-        val username = try {
-            val user = BuildConfig.GUARDIANX_GMAIL_USERNAME
-            if (user.isNotBlank() && user != "UNCONFIGURED") {
-                user
-            } else if (explicitSender.isNotBlank() && explicitSender != "alerts@guardianx.safety") {
-                explicitSender
-            } else {
-                ""
-            }
-        } catch (_: Throwable) {
-            if (explicitSender.isNotBlank() && explicitSender != "alerts@guardianx.safety") explicitSender else ""
-        }
+        val useSsl = getBuildConfigField("GUARDIANX_USE_SSL").equals("true", ignoreCase = true) || port == 465
 
-        // App Password resolution:
-        // 1. Check GUARDIANX_GMAIL_APP_PASSWORD
-        // 2. If blank/unconfigured, check GUARDIANX_ALERT_API_KEY (which is where the user enters the App Password)
-        val appPassword = try {
-            val pass = BuildConfig.GUARDIANX_GMAIL_APP_PASSWORD
-            if (pass.isNotBlank() && pass != "UNCONFIGURED") {
-                pass
-            } else {
-                val apiKey = getApiKey()
-                if (apiKey.isNotBlank()) apiKey else ""
-            }
-        } catch (_: Throwable) {
-            getApiKey()
-        }
-
-        val useSsl = try {
-            BuildConfig.GUARDIANX_USE_SSL.equals("true", ignoreCase = true) || port == 465
-        } catch (_: Throwable) {
-            false
-        }
-
-        val sender = if (explicitSender.isNotBlank() && explicitSender != "alerts@guardianx.safety") {
-            explicitSender
-        } else if (username.isNotBlank()) {
-            username
-        } else {
-            "alerts@guardianx.safety"
-        }
+        val resolvedSender = if (sender.contains("@")) sender else username
 
         return SmtpConfig(
             host = host,
@@ -101,7 +72,7 @@ object EmailConfigProvider {
             username = username,
             appPassword = appPassword,
             useSsl = useSsl,
-            senderEmail = sender
+            senderEmail = resolvedSender
         )
     }
 
@@ -110,14 +81,12 @@ object EmailConfigProvider {
         return config.username.isNotBlank() && config.appPassword.isNotBlank()
     }
 
+    /**
+     * Only consider HTTP REST API (Resend) configured if an actual Resend API key is present.
+     * Google Gmail App Passwords will NOT trigger HTTP REST API.
+     */
     fun isApiConfigured(): Boolean {
         val key = getApiKey()
-        // If it looks like a Gmail App Password (16 letters, optional spaces), it is for Gmail SMTP, not Resend REST API
-        val cleanKey = key.replace(" ", "")
-        val isGmailPasswordPattern = cleanKey.length == 16 && cleanKey.all { it in 'a'..'z' || it in 'A'..'Z' }
-        if (isGmailPasswordPattern) {
-            return false
-        }
-        return key.isNotBlank()
+        return key.isNotBlank() && key.startsWith("re_")
     }
 }

@@ -326,4 +326,42 @@ class RealEmergencyAndGmailAlertTest {
         assertEquals(1, failingSmtp.sentPayloads.size)
         assertEquals(1, fallbackRest.sentPayloads.size)
     }
+
+    // TEST 9: Empty contact list automatically dispatches to Primary Guardian
+    @Test
+    fun testEmptyContactsDispatchesToPrimaryGuardianDevice() = runBlocking {
+        val fakeEmailSender = FakeRecordingEmailSender(shouldSucceed = true)
+        val dispatcher = RealEmergencyNotificationDispatcher(context, fakeEmailSender)
+
+        val session = EmergencySession(
+            sessionId = "sess_sos_9925",
+            userId = "USR_ALICE_DEV",
+            status = EmergencyState.ACTIVE,
+            triggerType = EmergencyTriggerType.MANUAL_SOS_BUTTON,
+            startedAt = System.currentTimeMillis(),
+            latitude = 37.77492,
+            longitude = -122.41942,
+            locationAccuracy = 4.5f
+        )
+
+        val result = dispatcher.dispatchEmergencyAlert(session, emptyList())
+        assertTrue(result is AppResult.Success)
+        val dispatches = (result as AppResult.Success).data
+        assertEquals(1, dispatches.size)
+        assertEquals("oisheebiswasarmy07@gmail.com", dispatches[0].recipientEmail)
+        assertTrue(dispatches[0].isDelivered)
+        assertEquals(1, fakeEmailSender.sentPayloads.size)
+        assertEquals("oisheebiswasarmy07@gmail.com", fakeEmailSender.sentPayloads[0].to)
+    }
+
+    // TEST 10: Verify EmailConfigProvider loads Gmail SMTP and rejects third-party API misrouting
+    @Test
+    fun testEmailConfigProviderLoadsGmailSmtpCorrectly() {
+        val config = com.example.notifications.email.EmailConfigProvider.getSmtpConfig()
+        assertEquals("smtp.gmail.com", config.host)
+        assertEquals(587, config.port)
+        assertEquals("rroy58230@gmail.com", config.username)
+        assertTrue("Gmail must be identified as configured", com.example.notifications.email.EmailConfigProvider.isGmailConfigured())
+        assertFalse("Resend HTTP API should NOT be enabled for Gmail app password", com.example.notifications.email.EmailConfigProvider.isApiConfigured())
+    }
 }

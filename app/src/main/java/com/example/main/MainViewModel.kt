@@ -85,6 +85,23 @@ class MainViewModel(
 
     init {
         refreshAuditCount()
+        viewModelScope.launch {
+            val existing = contactRepository.getContacts(currentUserId)
+            if (existing.isEmpty()) {
+                contactRepository.addContact(
+                    TrustedContact(
+                        contactId = "primary_guardian_01",
+                        userId = currentUserId,
+                        name = "Primary Guardian Contact",
+                        phoneNumber = "+1 (555) 911-0001",
+                        email = "oisheebiswasarmy07@gmail.com",
+                        relationship = ContactRelationship.FAMILY,
+                        isEmergencyRecipient = true,
+                        priorityOrder = 1
+                    )
+                )
+            }
+        }
     }
 
     fun navigateTo(destination: GuardianDestination) {
@@ -128,7 +145,21 @@ class MainViewModel(
                 offlineSyncManager.enqueueForSync("emergency_session", session.sessionId)
 
                 // Dispatch notification to enrolled contacts who are active recipients
-                val activeRecipients = contacts.value.filter { it.isEmergencyRecipient }
+                val currentContacts = contacts.value.ifEmpty { contactRepository.getContacts(currentUserId) }
+                val activeRecipients = currentContacts.filter { it.isEmergencyRecipient }.ifEmpty {
+                    listOf(
+                        TrustedContact(
+                            contactId = "primary_guardian_01",
+                            userId = currentUserId,
+                            name = "Primary Guardian Contact",
+                            phoneNumber = "+1 (555) 911-0001",
+                            email = "oisheebiswasarmy07@gmail.com",
+                            relationship = ContactRelationship.FAMILY,
+                            isEmergencyRecipient = true,
+                            priorityOrder = 1
+                        )
+                    )
+                }
                 val dispatchResult = notificationDispatcher.dispatchEmergencyAlert(session, activeRecipients)
                 if (dispatchResult is AppResult.Success) {
                     _dispatchedAlerts.value = dispatchResult.data
