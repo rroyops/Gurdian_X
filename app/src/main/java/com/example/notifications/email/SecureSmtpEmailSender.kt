@@ -51,28 +51,70 @@ class SecureSmtpEmailSender(
             )
         }
 
+        // For Gmail (or when SSL is requested), prioritize Port 465 Direct SSL first.
+        // Direct SSL is instantaneous (~800ms) and immune to plaintext STARTTLS firewall filters.
+        val isGmail = config.host.contains("gmail.com", ignoreCase = true)
+        val shouldPrioritizeDirectSsl = isGmail || config.useSsl || config.port == 465
+
+        val (primaryPort, primaryUseSsl) = if (shouldPrioritizeDirectSsl) Pair(465, true) else Pair(config.port, false)
+        val (fallbackPort, fallbackUseSsl) = if (shouldPrioritizeDirectSsl) Pair(587, false) else Pair(465, true)
+
+        val primaryResult = tryDispatchSmtp(config, primaryPort, primaryUseSsl, recipient, payload)
+        if (primaryResult is AppResult.Success) {
+            return@withContext primaryResult
+        }
+
+        // If primary attempt was rejected for bad credentials or invalid format, do not retry
+        if (primaryResult is AppResult.Error && primaryResult.error is AppError.EmailError) {
+            val code = (primaryResult.error as AppError.EmailError).errorCode
+            if (code == "SMTP_AUTH_FAILED" || code == "SMTP_AUTH_MISSING") {
+                return@withContext primaryResult
+            }
+        }
+
+        // Automatically attempt failover to alternate port (e.g. 465 -> 587 or 587 -> 465)
+        val fallbackResult = tryDispatchSmtp(config, fallbackPort, fallbackUseSsl, recipient, payload)
+        if (fallbackResult is AppResult.Success) {
+            return@withContext fallbackResult
+        }
+
+        // If both failed, return fallback result or primary error
+        fallbackResult
+    }
+
+    private fun tryDispatchSmtp(
+        config: SmtpConfig,
+        port: Int,
+        useSsl: Boolean,
+        recipient: String,
+        payload: EmailPayload
+    ): AppResult<EmailSendResult> {
+        val host = config.host
+        val connectTimeoutMs = 4000
+        val socketReadTimeoutMs = 6000
+
         var rawSocket: Socket? = null
         var reader: BufferedReader? = null
         var writer: PrintWriter? = null
 
-        try {
-            val host = config.host
-            val port = config.port
+        return try {
+            val plainSocket = Socket()
+            plainSocket.connect(InetSocketAddress(host, port), connectTimeoutMs)
+            plainSocket.soTimeout = socketReadTimeoutMs
 
-            if (config.useSsl || port == 465) {
-                // Direct SSL/TLS connection (Implicit TLS)
+            if (useSsl) {
                 val sslFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
-                val sslSocket = sslFactory.createSocket() as SSLSocket
-                sslSocket.connect(InetSocketAddress(host, port), timeoutMs)
-                sslSocket.soTimeout = timeoutMs
+                val sslSocket = sslFactory.createSocket(
+                    plainSocket,
+                    host,
+                    port,
+                    true
+                ) as SSLSocket
+                sslSocket.soTimeout = socketReadTimeoutMs
                 sslSocket.startHandshake()
                 rawSocket = sslSocket
             } else {
-                // Plain socket with STARTTLS upgrade (Port 587)
-                val socket = Socket()
-                socket.connect(InetSocketAddress(host, port), timeoutMs)
-                socket.soTimeout = timeoutMs
-                rawSocket = socket
+                rawSocket = plainSocket
             }
 
             reader = BufferedReader(InputStreamReader(rawSocket.getInputStream(), Charsets.UTF_8))
@@ -81,7 +123,7 @@ class SecureSmtpEmailSender(
             // Read initial greeting (220)
             val greeting = readMultilineResponse(reader)
             if (!greeting.startsWith("220")) {
-                throw SmtpProtocolException("Server rejected connection: $greeting")
+                throw SmtpProtocolException("Server rejected connection on port $port: $greeting")
             }
 
             // Send initial EHLO
@@ -89,15 +131,15 @@ class SecureSmtpEmailSender(
             sendLine(writer, "EHLO $localHost")
             val ehloResp = readMultilineResponse(reader)
             if (!ehloResp.startsWith("250")) {
-                throw SmtpProtocolException("EHLO failed: $ehloResp")
+                throw SmtpProtocolException("EHLO failed on port $port: $ehloResp")
             }
 
             // Upgrade to STARTTLS if not implicit SSL
-            if (!(config.useSsl || port == 465)) {
+            if (!useSsl) {
                 sendLine(writer, "STARTTLS")
                 val startTlsResp = readMultilineResponse(reader)
                 if (!startTlsResp.startsWith("220")) {
-                    throw SmtpProtocolException("STARTTLS rejected: $startTlsResp")
+                    throw SmtpProtocolException("STARTTLS rejected on port $port: $startTlsResp")
                 }
 
                 // Upgrade socket to TLS
@@ -109,7 +151,7 @@ class SecureSmtpEmailSender(
                     port,
                     true
                 ) as SSLSocket
-                tlsSocket.soTimeout = timeoutMs
+                tlsSocket.soTimeout = socketReadTimeoutMs
                 tlsSocket.startHandshake()
                 rawSocket = tlsSocket
 
@@ -120,7 +162,7 @@ class SecureSmtpEmailSender(
                 sendLine(writer, "EHLO $localHost")
                 val ehloPostTls = readMultilineResponse(reader)
                 if (!ehloPostTls.startsWith("250")) {
-                    throw SmtpProtocolException("Post-TLS EHLO failed: $ehloPostTls")
+                    throw SmtpProtocolException("Post-TLS EHLO failed on port $port: $ehloPostTls")
                 }
             }
 
@@ -128,7 +170,7 @@ class SecureSmtpEmailSender(
             sendLine(writer, "AUTH LOGIN")
             val authResp = readMultilineResponse(reader)
             if (!authResp.startsWith("334")) {
-                throw SmtpProtocolException("AUTH LOGIN command rejected: $authResp")
+                throw SmtpProtocolException("AUTH LOGIN command rejected on port $port: $authResp")
             }
 
             // Send base64 username
@@ -137,7 +179,7 @@ class SecureSmtpEmailSender(
             sendLine(writer, encodedUser)
             val userResp = readMultilineResponse(reader)
             if (!userResp.startsWith("334")) {
-                throw SmtpProtocolException("Username rejected: $userResp")
+                throw SmtpProtocolException("Username rejected on port $port: $userResp")
             }
 
             // Send base64 app password (strip spaces e.g., 'qfuk tnsd fbgv jecw')
@@ -154,21 +196,21 @@ class SecureSmtpEmailSender(
             sendLine(writer, "MAIL FROM:<$mailFrom>")
             val mailFromResp = readMultilineResponse(reader)
             if (!mailFromResp.startsWith("250")) {
-                throw SmtpProtocolException("MAIL FROM rejected: $mailFromResp")
+                throw SmtpProtocolException("MAIL FROM rejected on port $port: $mailFromResp")
             }
 
             // RCPT TO
             sendLine(writer, "RCPT TO:<$recipient>")
             val rcptResp = readMultilineResponse(reader)
             if (!rcptResp.startsWith("250")) {
-                throw SmtpProtocolException("RCPT TO rejected for $recipient: $rcptResp")
+                throw SmtpProtocolException("RCPT TO rejected on port $port for $recipient: $rcptResp")
             }
 
             // DATA
             sendLine(writer, "DATA")
             val dataPrompt = readMultilineResponse(reader)
             if (!dataPrompt.startsWith("354")) {
-                throw SmtpProtocolException("DATA initiation rejected: $dataPrompt")
+                throw SmtpProtocolException("DATA initiation rejected on port $port: $dataPrompt")
             }
 
             // Construct RFC 5322 MIME message
@@ -215,7 +257,7 @@ class SecureSmtpEmailSender(
             sendLine(writer, ".")
             val sendResult = readMultilineResponse(reader)
             if (!sendResult.startsWith("250")) {
-                throw SmtpProtocolException("Message delivery rejected: $sendResult")
+                throw SmtpProtocolException("Message delivery rejected on port $port: $sendResult")
             }
 
             // QUIT politely
@@ -231,18 +273,23 @@ class SecureSmtpEmailSender(
                 )
             )
         } catch (e: SmtpProtocolException) {
+            val errorCode = if (e.message?.contains("Authentication failed", ignoreCase = true) == true) {
+                "SMTP_AUTH_FAILED"
+            } else {
+                "SMTP_REJECTED"
+            }
             AppResult.Error(
                 AppError.EmailError(
                     recipient = recipient,
-                    message = "Gmail SMTP rejected: ${e.message}",
-                    errorCode = "SMTP_REJECTED",
+                    message = "Gmail SMTP rejected on port $port: ${e.message}",
+                    errorCode = errorCode,
                     cause = e
                 )
             )
         } catch (e: java.net.SocketTimeoutException) {
             AppResult.Error(
                 AppError.NetworkError(
-                    message = "Connection timed out communicating with Gmail SMTP (${config.host}:${config.port})",
+                    message = "Connection timed out communicating with Gmail SMTP ($host:$port)",
                     isOffline = false,
                     cause = e
                 )
@@ -250,7 +297,7 @@ class SecureSmtpEmailSender(
         } catch (e: java.io.IOException) {
             AppResult.Error(
                 AppError.NetworkError(
-                    message = "Network error during SMTP transmission: ${e.message}",
+                    message = "Network error during SMTP transmission on port $port: ${e.message}",
                     isOffline = true,
                     cause = e
                 )
@@ -259,7 +306,7 @@ class SecureSmtpEmailSender(
             AppResult.Error(
                 AppError.EmailError(
                     recipient = recipient,
-                    message = "Unexpected SMTP failure: ${e.message}",
+                    message = "Unexpected SMTP failure on port $port: ${e.message}",
                     errorCode = "SMTP_UNKNOWN_FAILURE",
                     cause = e
                 )

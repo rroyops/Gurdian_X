@@ -14,13 +14,17 @@ data class SmtpConfig(
 object EmailConfigProvider {
 
     private fun getBuildConfigField(fieldName: String): String? {
-        return try {
+        val buildConfigVal = try {
             val field = BuildConfig::class.java.getField(fieldName)
             val value = field.get(null) as? String
             if (value != null && value.isNotBlank() && value != "UNCONFIGURED" && value != "alerts@guardianx.safety") value.trim() else null
         } catch (_: Throwable) {
             null
         }
+        if (buildConfigVal != null) return buildConfigVal
+
+        val envVal = System.getenv(fieldName)
+        return if (envVal != null && envVal.isNotBlank() && envVal != "UNCONFIGURED" && envVal != "alerts@guardianx.safety") envVal.trim() else null
     }
 
     /**
